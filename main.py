@@ -3,12 +3,13 @@ import json
 import logging
 from pathlib import Path
 import pandas as pd
+
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
-from src import DatasetInfo, HealthResponse, setup_logging, ProcessConfig, ProcessingReport, log_requests, MovieStorage, MovieUploadInfo, MovieDataResponse, MovieProcessingReport
+from src import HealthResponse, setup_logging, ProcessConfig, log_requests, MovieStorage, MovieUploadInfo, MovieDataResponse, MovieProcessingReport, MOVIE_COLUMNS, MovieCache
 from data_pipeline import create_cleaning_report, process_data, validate_dataframe
-from src.storage import MOVIE_COLUMNS
 
 
+cache = MovieCache()
 
 storage = MovieStorage()
 
@@ -49,6 +50,7 @@ async def upload_movies(file: UploadFile = File(...)):
 
     df = df[MOVIE_COLUMNS]
 
+    cache.invalidate()
     storage.save(df)
     
     logger.info("Uploaded movies: filename=%s, rows= %s", file.filename, len(df))
@@ -63,15 +65,20 @@ async def upload_movies(file: UploadFile = File(...)):
 @app.get("/movies", response_model=MovieDataResponse)
 def get_movies(limit: int = Query(default=100, ge=1)):
     """Return up to limit movies and the total movie count."""
+    cached = cache.get(limit)
+    if cached is not None:
+        logger.info("movie rows=%s", len(cached["data"]))
+        return cached
+
     records = storage.select_columns(MOVIE_COLUMNS, limit)
     total_rows = storage.count_movies()
+    response = {"data": records, "total_rows": total_rows}
+
+    cache.set(limit, response)
 
     logger.info("Retrieved movies: returned_rows=%s, total_rows=%s", len(records), total_rows)
 
-    if not records:
-        return {"data": [], "total_rows": 0}
-
-    return {"data": records, "total_rows": total_rows}
+    return response
 
 @app.get("/movies/search", response_model=list[dict])
 def query_movies(
@@ -113,7 +120,6 @@ def process_movies(config: ProcessConfig):
         raise HTTPException(status_code=400, detail=str(error)) from error
 
     df = validated_df.copy()
-
     validation_rows_removed =(len(dataset) - len(validated_df))
 
     try:
@@ -122,9 +128,8 @@ def process_movies(config: ProcessConfig):
         raise HTTPException(status_code=400, detail=str(error)) from error
 
     report = create_cleaning_report(validated_df, processed_df)
-
-
     storage.save(processed_df)
+    cache.invalidate() 
 
     return {
         "validation_rows_removed": validation_rows_removed,

@@ -4,14 +4,6 @@ class HealthResponse(BaseModel):
     status: str
     version: str
 
-
-class DatasetInfo(BaseModel):
-    id: int
-    filename: str
-    rows: int
-    columns: int
-    column_names: list[str]
-
 class ValidationSettings(BaseModel):
     required_columns: list[str] = Field(default_factory=list)
     numeric_columns: list[str] = Field(default_factory=list)
@@ -34,11 +26,6 @@ class ProcessingSettings(BaseModel):
 class ProcessConfig(BaseModel):
     validation: ValidationSettings = Field(default_factory=ValidationSettings)
     processing: ProcessingSettings = Field(default_factory=ProcessingSettings)
-
-class ProcessingReport(BaseModel):
-    id: int
-    validation_rows_removed: int
-    cleaning_report: dict[str, int]
 
 class MovieUploadInfo(BaseModel):
     filename: str
